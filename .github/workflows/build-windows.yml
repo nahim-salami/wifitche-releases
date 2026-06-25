@@ -1,0 +1,110 @@
+name: Build Windows (WiFiTche)
+
+# Build dans le depot PUBLIC wifitche-releases (runner windows-latest gratuit
+# pour les depots publics). Le code source prive `wifitche` est clone de facon
+# ephemere dans src/ ; seuls les ZIP des executables sont publies en Release.
+#
+# Prerequis (une fois) : secret `WIFITCHE_SOURCE_TOKEN` = PAT fine-grained
+# « Contents: Read » sur le depot prive nahim-salami/wifitche.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branche/tag du depot prive a builder"
+        required: true
+        default: "main"
+        type: string
+      api_base_url:
+        description: "URL du backend (API_BASE_URL)"
+        required: true
+        default: "https://wifitche-api.vercel.app/api/v1"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }} (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: admin
+            path: admin
+            asset: wifitche-admin-windows.zip
+            project: wifitche_admin
+          - name: client
+            path: client
+            asset: wifitche-client-windows.zip
+            project: wifitche_client
+          - name: techno
+            path: tech
+            asset: wifitche-techno-windows.zip
+            project: wifitche_techno
+
+    steps:
+      - name: Cloner le code source prive (ephemere)
+        uses: actions/checkout@v4
+        with:
+          repository: nahim-salami/wifitche
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.WIFITCHE_SOURCE_TOKEN }}
+          path: src
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Generate windows project if missing
+        shell: bash
+        working-directory: src/${{ matrix.path }}
+        run: |
+          if [ ! -d "windows" ]; then
+            flutter create --org net.ahime.wifitche --project-name ${{ matrix.project }} --platforms=windows .
+          fi
+
+      - name: Get dependencies
+        working-directory: src/${{ matrix.path }}
+        run: flutter pub get
+
+      - name: Build Windows release
+        working-directory: src/${{ matrix.path }}
+        run: flutter build windows --release --dart-define=API_BASE_URL=${{ inputs.api_base_url }}
+
+      - name: Package ZIP
+        id: pack
+        shell: pwsh
+        working-directory: src/${{ matrix.path }}
+        run: |
+          $rel = "build/windows/x64/runner/Release"
+          if (-not (Test-Path $rel)) { $rel = "build/windows/runner/Release" }
+          if (-not (Test-Path $rel)) { Write-Error "Release folder not found"; exit 1 }
+          $zip = "$env:GITHUB_WORKSPACE/${{ matrix.asset }}"
+          Compress-Archive -Path "$rel/*" -DestinationPath $zip -Force
+          "zip_path=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Get-Item $zip | Select-Object Name, Length
+
+      - name: Publish stable release assets (depot public courant)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: WiFiTche - derniere version
+          files: ${{ steps.pack.outputs.zip_path }}
+          fail_on_unmatched_files: true
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### Windows ${{ matrix.name }} OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Archive: ${{ matrix.asset }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source: nahim-salami/wifitche@${{ inputs.source_ref }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API: ${{ inputs.api_base_url }}" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,75 @@
+name: Build Web (Superadmin)
+
+# Build dans le depot PUBLIC wifitche-releases (minutes Actions gratuites).
+# Le code source prive `wifitche` est clone de facon ephemere, puis le web
+# superadmin est compile et deploye sur Vercel.
+#
+# Prerequis : secret `WIFITCHE_SOURCE_TOKEN` (PAT Contents:Read sur wifitche)
+# + secrets VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID (projet superadmin).
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branche/tag du depot prive a builder"
+        required: true
+        default: "main"
+        type: string
+      api_base_url:
+        description: "URL du backend (API_BASE_URL)"
+        required: true
+        default: "https://wifitche-api.vercel.app/api/v1"
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  build-web:
+    name: Build superadmin web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Cloner le code source prive (ephemere)
+        uses: actions/checkout@v4
+        with:
+          repository: nahim-salami/wifitche
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.WIFITCHE_SOURCE_TOKEN }}
+          path: src
+
+      - name: Installer Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generer le dossier web/ si manquant
+        working-directory: src/superadmin
+        run: |
+          if [ ! -d "web" ]; then
+            flutter create --org net.ahime.wifitche --project-name wifitche_superadmin --platforms=web .
+          fi
+
+      - name: Recuperer les dependances
+        working-directory: src/superadmin
+        run: flutter pub get
+
+      - name: Build Web (release)
+        working-directory: src/superadmin
+        run: flutter build web --release --base-href / --dart-define=API_BASE_URL=${{ inputs.api_base_url }}
+
+      - name: Deployer sur Vercel (si secrets presents)
+        if: ${{ env.VERCEL_TOKEN != '' }}
+        working-directory: src/superadmin
+        run: |
+          npm i -g vercel@latest
+          vercel deploy build/web --prod --yes --token "$VERCEL_TOKEN" > deploy-url.txt
+          echo "### Deploiement Vercel superadmin" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL : $(cat deploy-url.txt)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source: nahim-salami/wifitche@${{ inputs.source_ref }}" >> "$GITHUB_STEP_SUMMARY"

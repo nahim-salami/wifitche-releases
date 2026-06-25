@@ -1,0 +1,120 @@
+name: Build APK (WiFiTche)
+
+# Build dans le depot PUBLIC wifitche-releases (minutes Actions gratuites).
+# Le code source prive `wifitche` est clone de facon ephemere ; seuls les
+# .apk sont publies en Release.
+#
+# Prerequis (une fois) : secret `WIFITCHE_SOURCE_TOKEN` = PAT fine-grained
+# « Contents: Read » sur le depot prive nahim-salami/wifitche.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Type de build APK"
+        required: true
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+      source_ref:
+        description: "Branche/tag du depot prive a builder"
+        required: true
+        default: "main"
+        type: string
+      api_base_url:
+        description: "URL du backend (API_BASE_URL)"
+        required: true
+        default: "https://wifitche-api.vercel.app/api/v1"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.app }} (${{ inputs.build_type }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [admin, client, superadmin]
+
+    steps:
+      - name: Cloner le code source prive (ephemere)
+        uses: actions/checkout@v4
+        with:
+          repository: nahim-salami/wifitche
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.WIFITCHE_SOURCE_TOKEN }}
+          path: src
+
+      - name: Installer Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Installer Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generer le dossier android/ si manquant
+        working-directory: src/${{ matrix.app }}
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create --org net.ahime.wifitche --project-name wifitche_${{ matrix.app }} --platforms=android .
+          fi
+
+      - name: Recuperer les dependances
+        working-directory: src/${{ matrix.app }}
+        run: flutter pub get
+
+      - name: Build APK
+        working-directory: src/${{ matrix.app }}
+        run: |
+          if [ "${{ inputs.build_type }}" = "release" ]; then
+            flutter build apk --release --dart-define=API_BASE_URL=${{ inputs.api_base_url }}
+          else
+            flutter build apk --debug --dart-define=API_BASE_URL=${{ inputs.api_base_url }}
+          fi
+
+      - name: Renommer l'APK
+        id: rename
+        working-directory: src/${{ matrix.app }}
+        run: |
+          SHORT_SHA=$(git -C "$GITHUB_WORKSPACE/src" rev-parse --short HEAD)
+          DATE=$(date -u +%Y%m%d-%H%M)
+          SRC="build/app/outputs/flutter-apk/app-${{ inputs.build_type }}.apk"
+          DEST="$GITHUB_WORKSPACE/wifitche-${{ matrix.app }}-${{ inputs.build_type }}-${DATE}-${SHORT_SHA}.apk"
+          mv "$SRC" "$DEST"
+          cp "$DEST" "$GITHUB_WORKSPACE/wifitche-${{ matrix.app }}.apk"
+          echo "apk_path=$DEST" >> "$GITHUB_OUTPUT"
+          echo "apk_stable=$GITHUB_WORKSPACE/wifitche-${{ matrix.app }}.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Publier l'APK en Release versionnee
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: APK WiFiTche - build ${{ github.run_number }}
+          files: ${{ steps.rename.outputs.apk_path }}
+          fail_on_unmatched_files: true
+
+      - name: Mettre a jour la release stable "latest" (liens permanents)
+        if: ${{ inputs.build_type == 'release' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: WiFiTche - derniere version
+          files: ${{ steps.rename.outputs.apk_stable }}
+          fail_on_unmatched_files: true
+
+      - name: Resume
+        run: |
+          echo "### APK ${{ matrix.app }} (${{ inputs.build_type }}) OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source: nahim-salami/wifitche@${{ inputs.source_ref }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API: ${{ inputs.api_base_url }}" >> "$GITHUB_STEP_SUMMARY"
