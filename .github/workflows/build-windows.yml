@@ -78,6 +78,10 @@ jobs:
 
       - name: Build Windows release
         working-directory: src/${{ matrix.path }}
+        env:
+          # firebase_cpp_sdk (admin: notifications push) declare cmake_minimum_required < 3.5,
+          # supprime dans CMake recent. Force la policy minimale pour configurer quand meme.
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: flutter build windows --release --dart-define=API_BASE_URL=${{ inputs.api_base_url }}
 
       - name: Package ZIP
