@@ -33,18 +33,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `iss` = script Inno Setup du depot prive. Absent = pas d'installateur
+          # pour cette app (seule l'archive portable est publiee).
           - name: admin
             path: admin
             asset: wifitche-admin-windows.zip
             project: wifitche_admin
+            iss: wifitche-admin.iss
+            setup: wifitche-admin-setup.exe
+            setup_zip: wifitche-admin-setup.zip
           - name: client
             path: client
             asset: wifitche-client-windows.zip
             project: wifitche_client
+            iss: wifitche-client.iss
+            setup: wifitche-client-setup.exe
+            setup_zip: wifitche-client-setup.zip
           - name: techno
             path: tech
             asset: wifitche-techno-windows.zip
             project: wifitche_techno
+            iss: wifitche-techno.iss
+            setup: wifitche-techno-setup.exe
+            setup_zip: wifitche-techno-setup.zip
 
     steps:
       - name: Cloner le code source prive (ephemere)
@@ -97,6 +108,47 @@ jobs:
           "zip_path=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Get-Item $zip | Select-Object Name, Length
 
+      - name: Install Inno Setup
+        if: matrix.iss != ''
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        id: installer
+        if: matrix.iss != ''
+        shell: pwsh
+        working-directory: src/${{ matrix.path }}
+        run: |
+          $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" |
+                  Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { Write-Error "ISCC.exe introuvable"; exit 1 }
+
+          # Version depuis pubspec.yaml ("1.0.0+1" -> "1.0.0") : elle s'affiche
+          # dans Applications installees et pilote le remplacement a la mise a jour.
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Trim().Split('+')[0]
+
+          $rel = Resolve-Path "build/windows/x64/runner/Release" -ErrorAction SilentlyContinue
+          if (-not $rel) { $rel = Resolve-Path "build/windows/runner/Release" }
+
+          & $iscc "/DSourceDir=$rel" "/DAppVersion=$version" "/DOutputDir=$(Resolve-Path .)\build\installer" "windows/installer/${{ matrix.iss }}"
+          if ($LASTEXITCODE -ne 0) { Write-Error "Compilation de l'installateur echouee"; exit 1 }
+
+          # L'installateur part zippe : un .exe telecharge directement est bloque
+          # par les navigateurs et par SmartScreen bien plus souvent qu'une archive.
+          $zip = "$env:GITHUB_WORKSPACE/${{ matrix.setup_zip }}"
+          Compress-Archive -Path "build/installer/${{ matrix.setup }}" -DestinationPath $zip -Force
+          "setup_zip_path=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Get-Item $zip | Select-Object Name, Length
+
+      - name: Publish installer (ZIP)
+        if: matrix.iss != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: WiFiTche - derniere version
+          files: ${{ steps.installer.outputs.setup_zip_path }}
+          fail_on_unmatched_files: true
+
       - name: Publish stable release assets (depot public courant)
         uses: softprops/action-gh-release@v2
         with:
@@ -109,6 +161,7 @@ jobs:
         shell: bash
         run: |
           echo "### Windows ${{ matrix.name }} OK" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Archive: ${{ matrix.asset }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Archive portable: ${{ matrix.asset }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Installateur: ${{ matrix.setup_zip || 'aucun' }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Source: nahim-salami/wifitche@${{ inputs.source_ref }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- API: ${{ inputs.api_base_url }}" >> "$GITHUB_STEP_SUMMARY"
