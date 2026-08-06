@@ -40,7 +40,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [admin, client, superadmin]
+        # `app` nomme l'APK publie, `dir` le dossier du depot source : pour
+        # WiFiTche Techno les deux different (dossier `tech`, app `techno`),
+        # c'est ce qui l'avait laisse hors des builds.
+        include:
+          - app: admin
+            dir: admin
+          - app: client
+            dir: client
+          - app: superadmin
+            dir: superadmin
+          - app: techno
+            dir: tech
 
     steps:
       - name: Cloner le code source prive (ephemere)
@@ -64,18 +75,18 @@ jobs:
           cache: true
 
       - name: Generer le dossier android/ si manquant
-        working-directory: src/${{ matrix.app }}
+        working-directory: src/${{ matrix.dir }}
         run: |
           if [ ! -d "android" ]; then
             flutter create --org net.ahime.wifitche --project-name wifitche_${{ matrix.app }} --platforms=android .
           fi
 
       - name: Recuperer les dependances
-        working-directory: src/${{ matrix.app }}
+        working-directory: src/${{ matrix.dir }}
         run: flutter pub get
 
       - name: Build APK
-        working-directory: src/${{ matrix.app }}
+        working-directory: src/${{ matrix.dir }}
         run: |
           if [ "${{ inputs.build_type }}" = "release" ]; then
             flutter build apk --release --dart-define=API_BASE_URL=${{ inputs.api_base_url }}
@@ -85,7 +96,7 @@ jobs:
 
       - name: Renommer l'APK
         id: rename
-        working-directory: src/${{ matrix.app }}
+        working-directory: src/${{ matrix.dir }}
         run: |
           SHORT_SHA=$(git -C "$GITHUB_WORKSPACE/src" rev-parse --short HEAD)
           DATE=$(date -u +%Y%m%d-%H%M)

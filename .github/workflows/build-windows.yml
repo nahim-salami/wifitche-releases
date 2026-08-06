@@ -56,6 +56,11 @@ jobs:
             iss: wifitche-techno.iss
             setup: wifitche-techno-setup.exe
             setup_zip: wifitche-techno-setup.zip
+          # Pas de script .iss cote superadmin : archive portable seulement.
+          - name: superadmin
+            path: superadmin
+            asset: wifitche-superadmin-windows.zip
+            project: wifitche_superadmin
 
     steps:
       - name: Cloner le code source prive (ephemere)
