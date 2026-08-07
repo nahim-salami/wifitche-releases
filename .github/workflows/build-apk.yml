@@ -52,6 +52,8 @@ jobs:
             dir: superadmin
           - app: techno
             dir: tech
+          - app: appeltche
+            dir: appeltche
 
     steps:
       - name: Cloner le code source prive (ephemere)
