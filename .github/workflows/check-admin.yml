@@ -1,0 +1,75 @@
+name: Verifier l'app admin (sans publier)
+
+# Verification seule, dans le depot PUBLIC (minutes Actions gratuites) :
+# le code prive `wifitche` est clone de facon ephemere, puis analyse, tests et
+# compilation web de l'app admin. Aucune release, aucun deploiement.
+# Seules les planches de tickets d'exemple (codes fictifs) sortent en artefact.
+#
+# Prerequis : secret `WIFITCHE_SOURCE_TOKEN` (deja utilise par les builds).
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branche/tag du depot prive a verifier"
+        required: true
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: src/admin
+    steps:
+      - name: Cloner le code source prive (ephemere)
+        uses: actions/checkout@v4
+        with:
+          repository: nahim-salami/wifitche
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.WIFITCHE_SOURCE_TOKEN }}
+          path: src
+
+      - name: Installer Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Dependances
+        run: flutter pub get
+
+      - name: Analyse (tickets imprimes)
+        run: >
+          flutter analyze --no-fatal-infos
+          lib/features/profiles
+          lib/core/services/router_direct_service.dart
+          test/ticket_print_test.dart
+
+      - name: Tests
+        run: flutter test test/ticket_print_test.dart
+
+      - name: Apercu PNG des planches
+        if: always()
+        run: |
+          sudo apt-get install -y poppler-utils >/dev/null
+          cd build/ticket-samples
+          for f in *.pdf; do pdftoppm -png -r 110 -f 1 -l 1 "$f" "${f%.pdf}"; done
+          ls -la
+
+      - name: Artefact planches (codes fictifs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ticket-samples
+          path: src/admin/build/ticket-samples
+          retention-days: 3
+          if-no-files-found: warn
+
+      - name: Compilation web (verifie toute l'app, rien n'est publie)
+        run: flutter build web --release --base-href /
