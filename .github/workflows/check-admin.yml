@@ -56,8 +56,9 @@ jobs:
 
       - name: Apercu PNG des planches
         if: always()
+        continue-on-error: true
         run: |
-          sudo apt-get install -y poppler-utils >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils >/dev/null
           cd build/ticket-samples
           for f in *.pdf; do pdftoppm -png -r 110 -f 1 -l 1 "$f" "${f%.pdf}"; done
           ls -la
