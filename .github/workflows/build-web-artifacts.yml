@@ -1,0 +1,82 @@
+name: Compiler les apps web (artefacts, sans deploiement)
+
+# Compile les apps web Flutter du depot prive et les publie en ARTEFACTS
+# uniquement : aucun deploiement. Le deploiement se fait ensuite sur le
+# compte Vercel voulu, a partir de ces artefacts.
+#
+# Prerequis : secret `WIFITCHE_SOURCE_TOKEN` (deja utilise par les builds).
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branche/tag du depot prive a compiler"
+        required: true
+        default: "main"
+        type: string
+      api_base_url:
+        description: "URL du backend (API_BASE_URL)"
+        required: true
+        default: "https://api.wifitche.ahime.net/api/v1"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Web ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: client
+            path: client
+            project: wifitche_client
+            extra: --pwa-strategy=offline-first
+          - name: admin
+            path: admin
+            project: wifitche_admin
+            extra: ""
+          - name: superadmin
+            path: superadmin
+            project: wifitche_superadmin
+            extra: ""
+    steps:
+      - name: Cloner le code source prive (ephemere)
+        uses: actions/checkout@v4
+        with:
+          repository: nahim-salami/wifitche
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.WIFITCHE_SOURCE_TOKEN }}
+          path: src
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generer web/ si manquant
+        working-directory: src/${{ matrix.path }}
+        run: |
+          if [ ! -d "web" ]; then
+            flutter create --org net.ahime.wifitche --project-name ${{ matrix.project }} --platforms=web .
+          fi
+
+      - name: Dependances
+        working-directory: src/${{ matrix.path }}
+        run: flutter pub get
+
+      - name: Build web (release)
+        working-directory: src/${{ matrix.path }}
+        run: flutter build web --release --base-href / ${{ matrix.extra }} --dart-define=API_BASE_URL=${{ inputs.api_base_url }}
+
+      - name: Artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-${{ matrix.name }}
+          path: src/${{ matrix.path }}/build/web
+          retention-days: 3
+          if-no-files-found: error
